@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+
+.env
+.env.local
+.env.*.local
+
+*.log
+.DS_Store
+
+# Prisma
+apps/server/prisma/migrations/**/migration_lock.toml

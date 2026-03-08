@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String   @id @default(cuid())
+  telegramId  String   @unique
+  username    String?
+  displayName String
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+
+  memberships    WorkspaceMember[]
+  threads        ChatThread[]
+  messages       ChatMessage[]
+  fileVersions   FileVersion[]
+  patchProposals PatchProposal[]
+  activities     ActivityEvent[]
+  usage          UsageRecord[]
+}
+
+model Workspace {
+  id        String   @id @default(cuid())
+  name      String
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  members    WorkspaceMember[]
+  projects   Project[]
+  activities ActivityEvent[]
+}
+
+model WorkspaceMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        String   @default("editor") // owner | editor | viewer
+  joinedAt    DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  description String?
+  language    String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  files     File[]
+  threads   ChatThread[]
+  patches   PatchProposal[]
+}
+
+model File {
+  id        String   @id @default(cuid())
+  projectId String
+  path      String
+  content   String   @default("")
+  language  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions FileVersion[]
+  changes  PatchFileChange[]
+
+  @@unique([projectId, path])
+}
+
+model FileVersion {
+  id          String   @id @default(cuid())
+  fileId      String
+  content     String
+  version     Int
+  createdById String
+  createdAt   DateTime @default(now())
+
+  file      File @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  createdBy User @relation(fields: [createdById], references: [id])
+
+  @@unique([fileId, version])
+}
+
+model ChatThread {
+  id          String   @id @default(cuid())
+  projectId   String
+  title       String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  project   Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy User            @relation(fields: [createdById], references: [id])
+  messages  ChatMessage[]
+  patches   PatchProposal[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  role      String   // user | assistant | system
+  content   String
+  thinking  String?
+  createdAt DateTime @default(now())
+  userId    String?
+
+  thread ChatThread      @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user   User?           @relation(fields: [userId], references: [id])
+  patch  PatchProposal[]
+}
+
+model PatchProposal {
+  id        String   @id @default(cuid())
+  projectId String
+  threadId  String
+  messageId String
+  title     String
+  status    String   @default("pending") // pending | approved | rejected | applied
+  createdAt DateTime @default(now())
+  createdById String
+
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  thread    ChatThread        @relation(fields: [threadId], references: [id])
+  message   ChatMessage       @relation(fields: [messageId], references: [id])
+  createdBy User              @relation(fields: [createdById], references: [id])
+  changes   PatchFileChange[]
+}
+
+model PatchFileChange {
+  id         String @id @default(cuid())
+  patchId    String
+  fileId     String?
+  filePath   String
+  action     String // create | modify | delete
+  diff       String
+  newContent String
+
+  patch PatchProposal @relation(fields: [patchId], references: [id], onDelete: Cascade)
+  file  File?         @relation(fields: [fileId], references: [id])
+}
+
+model ActivityEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  projectId   String?
+  userId      String
+  type        String
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+}
+
+model UsageRecord {
+  id               String   @id @default(cuid())
+  userId           String
+  model            String
+  promptTokens     Int
+  completionTokens Int
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
