@@ -10,7 +10,7 @@ declare module "fastify" {
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
-const SKIP_AUTH = ["/api/auth/", "/api/health"];
+const SKIP_AUTH = ["/api/auth/", "/api/health", "/api/ready"];
 
 export const authPlugin = fp(async (app: FastifyInstance) => {
   app.decorateRequest("userId", "");

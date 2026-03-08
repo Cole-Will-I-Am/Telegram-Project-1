@@ -2,6 +2,7 @@ import { createHmac } from "crypto";
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 const MAX_AGE_SECONDS = 300; // 5 minutes
+const DEV_AUTH_ENABLED = (process.env.TELEGRAM_DEV_AUTH || "false").toLowerCase() === "true";
 
 interface TelegramUser {
   id: number;
@@ -19,6 +20,9 @@ export interface ValidatedTelegramData {
 export function validateInitData(initData: string): ValidatedTelegramData {
   // Dev mode bypass
   if (initData === "dev-mode") {
+    if (!DEV_AUTH_ENABLED) {
+      throw new Error("Dev mode auth is disabled");
+    }
     return {
       user: {
         id: 999999,

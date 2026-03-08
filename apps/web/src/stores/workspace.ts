@@ -13,6 +13,7 @@ interface WorkspaceState {
   activeFile: ProjectFile | null;
 
   fetchWorkspaces: () => Promise<void>;
+  ensureDefaultProject: () => Promise<Project | null>;
   setActiveWorkspace: (ws: Workspace) => void;
   fetchProjects: (workspaceId: string) => Promise<void>;
   setActiveProject: (p: Project) => void;
@@ -35,7 +36,30 @@ export const useWorkspaceStore = create<WorkspaceState>()((set, get) => ({
     const workspaces = await api.get<Workspace[]>("/api/workspaces");
     const active = workspaces[0] ?? null;
     set({ workspaces, activeWorkspace: active });
-    if (active) get().fetchProjects(active.id);
+    if (active) {
+      await get().fetchProjects(active.id);
+    } else {
+      set({ projects: [], activeProject: null, files: [], activeFile: null });
+    }
+  },
+
+  ensureDefaultProject: async () => {
+    let { activeWorkspace, projects } = get();
+    if (!activeWorkspace) {
+      await get().fetchWorkspaces();
+      activeWorkspace = get().activeWorkspace;
+      projects = get().projects;
+    }
+    if (!activeWorkspace) return null;
+
+    if (projects.length > 0) return projects[0];
+
+    const project = await get().createProject(activeWorkspace.id, {
+      name: "General",
+      description: "Default project for chats",
+      language: "typescript",
+    });
+    return project;
   },
 
   setActiveWorkspace: (ws) => {

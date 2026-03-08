@@ -8,12 +8,22 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U forge -d forge_code"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7-alpine
     volumes:
       - redisdata:/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   server:
     build:
@@ -23,16 +33,28 @@ services:
       DATABASE_URL: postgresql://forge:${POSTGRES_PASSWORD:-forge}@postgres:5432/forge_code
       REDIS_URL: redis://redis:6379
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_BOT_ENABLED: ${TELEGRAM_BOT_ENABLED:-true}
+      TELEGRAM_BOT_GROUP_MODE: ${TELEGRAM_BOT_GROUP_MODE:-all}
+      TELEGRAM_MINIAPP_URL: ${TELEGRAM_MINIAPP_URL:-}
+      TELEGRAM_DEV_AUTH: ${TELEGRAM_DEV_AUTH:-false}
       JWT_SECRET: ${JWT_SECRET}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5-coder:14b}
       SERVER_PORT: "3001"
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
     ports:
       - "3001:3001"
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/api/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   web:
     build:
@@ -44,8 +66,14 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/login || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:

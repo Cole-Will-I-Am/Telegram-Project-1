@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { cn } from "@/components/ui/cn";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
 import { useWorkspaceStore } from "@/stores/workspace";
 import { useChatStore } from "@/stores/chat";
 
@@ -12,10 +11,34 @@ type Mode = "chats" | "projects";
 
 export function Sidebar() {
   const [mode, setMode] = useState<Mode>("chats");
+  const [creating, setCreating] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
-  const threads = useChatStore((s) => s.threads);
-  const projects = useWorkspaceStore((s) => s.projects);
+  const { projects, activeWorkspace, ensureDefaultProject, createProject } = useWorkspaceStore();
+  const { threads, ensureDefaultThread } = useChatStore();
+
+  const handleCreate = async () => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      if (mode === "chats") {
+        const project = await ensureDefaultProject();
+        if (!project) return;
+        const thread = await ensureDefaultThread(project.id);
+        router.push(`/chat/${thread.id}`);
+      } else {
+        if (!activeWorkspace) return;
+        const project = await createProject(activeWorkspace.id, {
+          name: `Project ${projects.length + 1}`,
+          description: "",
+          language: "typescript",
+        });
+        router.push(`/project/${project.id}`);
+      }
+    } finally {
+      setCreating(false);
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -107,13 +130,8 @@ export function Sidebar() {
           variant="secondary"
           size="sm"
           className="w-full"
-          onClick={() => {
-            if (mode === "chats") {
-              router.push("/chat");
-            } else {
-              router.push("/project/new");
-            }
-          }}
+          onClick={handleCreate}
+          loading={creating}
         >
           + New {mode === "chats" ? "Chat" : "Project"}
         </Button>

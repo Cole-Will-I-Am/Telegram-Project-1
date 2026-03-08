@@ -10,11 +10,42 @@ const createSchema = z.object({
 const updateSchema = z.object({
   content: z.string(),
 });
+const EDITOR_ROLES = ["owner", "editor"] as const;
 
 export async function fileRoutes(app: FastifyInstance) {
+  const canReadProject = async (projectId: string, userId: string) => {
+    const project = await app.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        workspace: { members: { some: { userId } } },
+      },
+      select: { id: true },
+    });
+    return !!project;
+  };
+
+  const canEditProject = async (projectId: string, userId: string) => {
+    const project = await app.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        workspace: {
+          members: {
+            some: { userId, role: { in: [...EDITOR_ROLES] } },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    return !!project;
+  };
+
   // List files in project
-  app.get("/projects/:pid/files", async (req) => {
+  app.get("/projects/:pid/files", async (req, reply) => {
     const { pid } = req.params as { pid: string };
+    if (!(await canReadProject(pid, req.userId))) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
+
     return app.prisma.file.findMany({
       where: { projectId: pid },
       orderBy: { path: "asc" },
@@ -22,9 +53,12 @@ export async function fileRoutes(app: FastifyInstance) {
   });
 
   // Create file
-  app.post("/projects/:pid/files", async (req) => {
+  app.post("/projects/:pid/files", async (req, reply) => {
     const { pid } = req.params as { pid: string };
     const data = createSchema.parse(req.body);
+    if (!(await canEditProject(pid, req.userId))) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
 
     const file = await app.prisma.file.create({
       data: { projectId: pid, ...data },
@@ -46,6 +80,10 @@ export async function fileRoutes(app: FastifyInstance) {
   // Upload file (multipart)
   app.post("/projects/:pid/files/upload", async (req, reply) => {
     const { pid } = req.params as { pid: string };
+    if (!(await canEditProject(pid, req.userId))) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
+
     const parts = req.parts();
 
     const files = [];
@@ -89,8 +127,11 @@ export async function fileRoutes(app: FastifyInstance) {
   // Get file
   app.get("/files/:fid", async (req, reply) => {
     const { fid } = req.params as { fid: string };
-    const file = await app.prisma.file.findUnique({
-      where: { id: fid },
+    const file = await app.prisma.file.findFirst({
+      where: {
+        id: fid,
+        project: { workspace: { members: { some: { userId: req.userId } } } },
+      },
       include: { versions: { orderBy: { version: "desc" }, take: 10 } },
     });
     if (!file) return reply.code(404).send({ error: "Not found" });
@@ -98,9 +139,23 @@ export async function fileRoutes(app: FastifyInstance) {
   });
 
   // Update file content
-  app.put("/files/:fid", async (req) => {
+  app.put("/files/:fid", async (req, reply) => {
     const { fid } = req.params as { fid: string };
     const { content } = updateSchema.parse(req.body);
+    const existing = await app.prisma.file.findFirst({
+      where: {
+        id: fid,
+        project: {
+          workspace: {
+            members: {
+              some: { userId: req.userId, role: { in: [...EDITOR_ROLES] } },
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    if (!existing) return reply.code(404).send({ error: "Not found" });
 
     const file = await app.prisma.file.update({
       where: { id: fid },
@@ -126,8 +181,23 @@ export async function fileRoutes(app: FastifyInstance) {
   });
 
   // Delete file
-  app.delete("/files/:fid", async (req) => {
+  app.delete("/files/:fid", async (req, reply) => {
     const { fid } = req.params as { fid: string };
+    const existing = await app.prisma.file.findFirst({
+      where: {
+        id: fid,
+        project: {
+          workspace: {
+            members: {
+              some: { userId: req.userId, role: { in: [...EDITOR_ROLES] } },
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    if (!existing) return reply.code(404).send({ error: "Not found" });
+
     await app.prisma.file.delete({ where: { id: fid } });
     return { ok: true };
   });

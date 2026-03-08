@@ -14,6 +14,7 @@ interface ChatState {
   abortController: AbortController | null;
 
   fetchThreads: (projectId: string) => Promise<void>;
+  ensureDefaultThread: (projectId: string) => Promise<ChatThread>;
   setActiveThread: (t: ChatThread | null) => void;
   fetchMessages: (threadId: string) => Promise<void>;
   sendMessage: (threadId: string, content: string, attachedFiles?: string[]) => Promise<void>;
@@ -33,6 +34,15 @@ export const useChatStore = create<ChatState>()((set, get) => ({
   fetchThreads: async (projectId) => {
     const threads = await api.get<ChatThread[]>(`/api/projects/${projectId}/threads`);
     set({ threads });
+  },
+
+  ensureDefaultThread: async (projectId) => {
+    await get().fetchThreads(projectId);
+    const existing = get().threads[0];
+    if (existing) return existing;
+    const created = await get().createThread(projectId, "New Chat");
+    set({ threads: [created], activeThread: created });
+    return created;
   },
 
   setActiveThread: (t) => {

@@ -1,5 +1,6 @@
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "qwen2.5-coder:14b";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
 const TIMEOUT_MS = 120_000;
 
 interface OllamaMessage {
@@ -20,9 +21,14 @@ export async function* streamChat(
   messages: OllamaMessage[],
   signal?: AbortSignal,
 ): AsyncGenerator<OllamaChunk> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (OLLAMA_API_KEY) {
+    headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
+  }
+
   const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({
       model: OLLAMA_MODEL,
       messages,

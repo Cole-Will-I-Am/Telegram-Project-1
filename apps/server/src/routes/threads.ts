@@ -2,11 +2,20 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 const createSchema = z.object({ title: z.string().min(1).max(200) });
+const EDITOR_ROLES = ["owner", "editor"] as const;
 
 export async function threadRoutes(app: FastifyInstance) {
   // List threads in project
-  app.get("/projects/:pid/threads", async (req) => {
+  app.get("/projects/:pid/threads", async (req, reply) => {
     const { pid } = req.params as { pid: string };
+    const project = await app.prisma.project.findFirst({
+      where: {
+        id: pid,
+        workspace: { members: { some: { userId: req.userId } } },
+      },
+    });
+    if (!project) return reply.code(403).send({ error: "Forbidden" });
+
     const threads = await app.prisma.chatThread.findMany({
       where: { projectId: pid },
       orderBy: { updatedAt: "desc" },
@@ -25,9 +34,20 @@ export async function threadRoutes(app: FastifyInstance) {
   });
 
   // Create thread
-  app.post("/projects/:pid/threads", async (req) => {
+  app.post("/projects/:pid/threads", async (req, reply) => {
     const { pid } = req.params as { pid: string };
     const { title } = createSchema.parse(req.body);
+    const project = await app.prisma.project.findFirst({
+      where: {
+        id: pid,
+        workspace: {
+          members: {
+            some: { userId: req.userId, role: { in: [...EDITOR_ROLES] } },
+          },
+        },
+      },
+    });
+    if (!project) return reply.code(403).send({ error: "Forbidden" });
 
     return app.prisma.chatThread.create({
       data: { projectId: pid, title, createdById: req.userId },
@@ -37,8 +57,11 @@ export async function threadRoutes(app: FastifyInstance) {
   // Get thread
   app.get("/threads/:tid", async (req, reply) => {
     const { tid } = req.params as { tid: string };
-    const thread = await app.prisma.chatThread.findUnique({
-      where: { id: tid },
+    const thread = await app.prisma.chatThread.findFirst({
+      where: {
+        id: tid,
+        project: { workspace: { members: { some: { userId: req.userId } } } },
+      },
       include: { _count: { select: { messages: true } } },
     });
     if (!thread) return reply.code(404).send({ error: "Not found" });
@@ -49,8 +72,17 @@ export async function threadRoutes(app: FastifyInstance) {
   });
 
   // Get messages for thread
-  app.get("/threads/:tid/messages", async (req) => {
+  app.get("/threads/:tid/messages", async (req, reply) => {
     const { tid } = req.params as { tid: string };
+    const thread = await app.prisma.chatThread.findFirst({
+      where: {
+        id: tid,
+        project: { workspace: { members: { some: { userId: req.userId } } } },
+      },
+      select: { id: true },
+    });
+    if (!thread) return reply.code(404).send({ error: "Not found" });
+
     return app.prisma.chatMessage.findMany({
       where: { threadId: tid },
       orderBy: { createdAt: "asc" },
@@ -58,8 +90,23 @@ export async function threadRoutes(app: FastifyInstance) {
   });
 
   // Delete thread
-  app.delete("/threads/:tid", async (req) => {
+  app.delete("/threads/:tid", async (req, reply) => {
     const { tid } = req.params as { tid: string };
+    const thread = await app.prisma.chatThread.findFirst({
+      where: {
+        id: tid,
+        project: {
+          workspace: {
+            members: {
+              some: { userId: req.userId, role: { in: [...EDITOR_ROLES] } },
+            },
+          },
+        },
+      },
+      select: { id: true },
+    });
+    if (!thread) return reply.code(404).send({ error: "Not found" });
+
     await app.prisma.chatThread.delete({ where: { id: tid } });
     return { ok: true };
   });

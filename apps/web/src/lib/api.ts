@@ -1,4 +1,25 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+const ENV_API_URL = process.env.NEXT_PUBLIC_API_URL || "";
+
+function resolveApiUrl(): string {
+  if (typeof window === "undefined") {
+    return ENV_API_URL || "http://localhost:3001";
+  }
+
+  if (!ENV_API_URL) return window.location.origin;
+
+  const host = window.location.hostname;
+  const appIsLocal = host === "localhost" || host === "127.0.0.1";
+  const apiIsLocal = /localhost|127\.0\.0\.1/.test(ENV_API_URL);
+
+  // Telegram clients cannot call localhost on your development machine.
+  if (apiIsLocal && !appIsLocal) {
+    return window.location.origin;
+  }
+
+  return ENV_API_URL;
+}
+
+const API_URL = resolveApiUrl();
 
 class ApiClient {
   private token: string | null = null;

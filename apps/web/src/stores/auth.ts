@@ -9,6 +9,7 @@ interface AuthState {
   token: string | null;
   user: User | null;
   loading: boolean;
+  hydrated: boolean;
   login: (initData: string) => Promise<void>;
   logout: () => void;
   hydrate: () => void;
@@ -20,6 +21,7 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       user: null,
       loading: false,
+      hydrated: false,
 
       login: async (initData: string) => {
         set({ loading: true });
@@ -43,6 +45,7 @@ export const useAuthStore = create<AuthState>()(
       hydrate: () => {
         const { token } = get();
         if (token) api.setToken(token);
+        set({ hydrated: true });
       },
     }),
     {

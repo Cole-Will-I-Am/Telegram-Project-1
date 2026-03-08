@@ -14,6 +14,11 @@ import { messageRoutes } from "./routes/messages.js";
 import { patchRoutes } from "./routes/patches.js";
 
 export async function buildApp() {
+  const corsOrigins = (process.env.CORS_ORIGIN || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const app = Fastify({
     logger: {
       transport: {
@@ -24,7 +29,10 @@ export async function buildApp() {
   });
 
   // Core plugins
-  await app.register(cors, { origin: true });
+  await app.register(cors, {
+    origin: corsOrigins.length > 0 ? corsOrigins : true,
+    credentials: true,
+  });
   await app.register(rateLimit, { max: 100, timeWindow: "1 minute" });
   await app.register(multipart, { limits: { fileSize: 5 * 1024 * 1024 } });
 
@@ -35,6 +43,16 @@ export async function buildApp() {
 
   // Health check
   app.get("/api/health", async () => ({ status: "ok" }));
+  app.get("/api/ready", async (req, reply) => {
+    try {
+      await app.prisma.$queryRaw`SELECT 1`;
+      await app.redis.ping();
+      return { status: "ready" };
+    } catch (error) {
+      req.log.error({ err: error }, "Readiness check failed");
+      return reply.code(503).send({ status: "not-ready" });
+    }
+  });
 
   // Routes
   await app.register(authRoutes, { prefix: "/api/auth" });

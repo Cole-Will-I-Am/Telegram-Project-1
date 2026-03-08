@@ -2,9 +2,32 @@ import type { FastifyInstance } from "fastify";
 import { parseCodeBlocks, generateDiff } from "../services/patch-parser.service.js";
 
 export async function patchRoutes(app: FastifyInstance) {
+  const canReadProject = async (projectId: string, userId: string) => {
+    const project = await app.prisma.project.findFirst({
+      where: { id: projectId, workspace: { members: { some: { userId } } } },
+      select: { id: true },
+    });
+    return !!project;
+  };
+
+  const canEditProject = async (projectId: string, userId: string) => {
+    const project = await app.prisma.project.findFirst({
+      where: {
+        id: projectId,
+        workspace: { members: { some: { userId, role: { in: ["owner", "editor"] } } } },
+      },
+      select: { id: true },
+    });
+    return !!project;
+  };
+
   // List patches for a project
-  app.get("/projects/:pid/patches", async (req) => {
+  app.get("/projects/:pid/patches", async (req, reply) => {
     const { pid } = req.params as { pid: string };
+    if (!(await canReadProject(pid, req.userId))) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
+
     return app.prisma.patchProposal.findMany({
       where: { projectId: pid },
       orderBy: { createdAt: "desc" },
@@ -15,8 +38,11 @@ export async function patchRoutes(app: FastifyInstance) {
   // Get patch detail
   app.get("/patches/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const patch = await app.prisma.patchProposal.findUnique({
-      where: { id },
+    const patch = await app.prisma.patchProposal.findFirst({
+      where: {
+        id,
+        project: { workspace: { members: { some: { userId: req.userId } } } },
+      },
       include: { changes: true, createdBy: true, message: true },
     });
     if (!patch) return reply.code(404).send({ error: "Not found" });
@@ -24,17 +50,24 @@ export async function patchRoutes(app: FastifyInstance) {
   });
 
   // Create patch from a message (called internally after model responds)
-  app.post("/patches/from-message", async (req) => {
+  app.post("/patches/from-message", async (req, reply) => {
     const { messageId, projectId, threadId } = req.body as {
       messageId: string;
       projectId: string;
       threadId: string;
     };
+    if (!(await canEditProject(projectId, req.userId))) {
+      return reply.code(403).send({ error: "Forbidden" });
+    }
 
-    const message = await app.prisma.chatMessage.findUnique({
-      where: { id: messageId },
+    const message = await app.prisma.chatMessage.findFirst({
+      where: {
+        id: messageId,
+        threadId,
+        thread: { projectId },
+      },
     });
-    if (!message) throw new Error("Message not found");
+    if (!message) return reply.code(404).send({ error: "Message not found" });
 
     const parsed = parseCodeBlocks(message.content);
     if (parsed.length === 0) return { created: false };
@@ -77,7 +110,16 @@ export async function patchRoutes(app: FastifyInstance) {
   // Approve patch
   app.post("/patches/:id/approve", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const patch = await app.prisma.patchProposal.findUnique({ where: { id } });
+    const patch = await app.prisma.patchProposal.findFirst({
+      where: {
+        id,
+        project: {
+          workspace: {
+            members: { some: { userId: req.userId, role: { in: ["owner", "editor"] } } },
+          },
+        },
+      },
+    });
     if (!patch) return reply.code(404).send({ error: "Not found" });
     if (patch.status !== "pending") {
       return reply.code(400).send({ error: "Patch is not pending" });
@@ -92,7 +134,16 @@ export async function patchRoutes(app: FastifyInstance) {
   // Reject patch
   app.post("/patches/:id/reject", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const patch = await app.prisma.patchProposal.findUnique({ where: { id } });
+    const patch = await app.prisma.patchProposal.findFirst({
+      where: {
+        id,
+        project: {
+          workspace: {
+            members: { some: { userId: req.userId, role: { in: ["owner", "editor"] } } },
+          },
+        },
+      },
+    });
     if (!patch) return reply.code(404).send({ error: "Not found" });
 
     return app.prisma.patchProposal.update({
@@ -104,8 +155,15 @@ export async function patchRoutes(app: FastifyInstance) {
   // Apply patch — actually update files
   app.post("/patches/:id/apply", async (req, reply) => {
     const { id } = req.params as { id: string };
-    const patch = await app.prisma.patchProposal.findUnique({
-      where: { id },
+    const patch = await app.prisma.patchProposal.findFirst({
+      where: {
+        id,
+        project: {
+          workspace: {
+            members: { some: { userId: req.userId, role: { in: ["owner", "editor"] } } },
+          },
+        },
+      },
       include: { changes: true },
     });
     if (!patch) return reply.code(404).send({ error: "Not found" });

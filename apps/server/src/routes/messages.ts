@@ -7,6 +7,7 @@ const sendSchema = z.object({
   content: z.string().min(1).max(10_000),
   attachedFiles: z.array(z.string()).optional(),
 });
+const EDITOR_ROLES = ["owner", "editor"] as const;
 
 export async function messageRoutes(app: FastifyInstance) {
   // Send message + get streaming response
@@ -14,15 +15,24 @@ export async function messageRoutes(app: FastifyInstance) {
     const { tid } = req.params as { tid: string };
     const { content, attachedFiles: fileIds } = sendSchema.parse(req.body);
 
-    // Verify thread exists
-    const thread = await app.prisma.chatThread.findUnique({
-      where: { id: tid },
+    // Verify thread and write permissions
+    const thread = await app.prisma.chatThread.findFirst({
+      where: {
+        id: tid,
+        project: {
+          workspace: {
+            members: {
+              some: { userId: req.userId, role: { in: [...EDITOR_ROLES] } },
+            },
+          },
+        },
+      },
       include: { project: true },
     });
     if (!thread) return reply.code(404).send({ error: "Thread not found" });
 
     // Save user message
-    const userMsg = await app.prisma.chatMessage.create({
+    await app.prisma.chatMessage.create({
       data: { threadId: tid, role: "user", content, userId: req.userId },
     });
 
@@ -38,10 +48,10 @@ export async function messageRoutes(app: FastifyInstance) {
     }));
 
     // Load attached files
-    const attachedFiles = [];
+    const attachedFiles: Array<{ path: string; content: string; language?: string | null }> = [];
     if (fileIds?.length) {
       const files = await app.prisma.file.findMany({
-        where: { id: { in: fileIds } },
+        where: { id: { in: fileIds }, projectId: thread.projectId },
       });
       attachedFiles.push(...files.map((f) => ({
         path: f.path,
