@@ -1,17 +1,12 @@
-import type { FastifyInstance } from "fastify";
 import { streamChat, listModels } from "./ollama.service.js";
 
 const TELEGRAM_API = "https://api.telegram.org";
 const BOT_TOKEN = process.env.MANTI_BOT_TOKEN || "";
-const BOT_ENABLED =
-  (process.env.MANTI_BOT_ENABLED || "true").toLowerCase() !== "false";
 const DEFAULT_MODEL = process.env.MANTI_DEFAULT_MODEL || "llama3.1:8b";
 const POLL_TIMEOUT_SECONDS = 30;
 const RETRY_DELAY_MS = 2_000;
 const TELEGRAM_TEXT_LIMIT = 4096;
-const HISTORY_TTL_SECONDS = 24 * 60 * 60;
 const HISTORY_TURNS = 12;
-const LOCK_TTL_SECONDS = 60;
 const MAX_PROMPT_CHARS = 8_000;
 
 type ChatType = "private" | "group" | "supergroup" | "channel";
@@ -64,6 +59,11 @@ interface BotTurn {
   user: string;
   assistant: string;
 }
+
+// In-memory stores (no Redis needed)
+const chatHistory = new Map<number, BotTurn[]>();
+const chatModels = new Map<number, string>();
+const chatLocks = new Set<number>();
 
 const SYSTEM_PROMPT = `You are Mantichat, a friendly and knowledgeable conversational AI assistant. You help users with a wide range of topics including general knowledge, creative writing, brainstorming, analysis, math, science, and everyday questions.
 
@@ -181,84 +181,32 @@ async function sendText(chatId: number, text: string, replyToMessageId?: number)
   }
 }
 
-function historyKey(chatId: number): string {
-  return `manti:history:${chatId}`;
+function loadHistory(chatId: number): BotTurn[] {
+  return chatHistory.get(chatId) || [];
 }
 
-function modelKey(chatId: number): string {
-  return `manti:model:${chatId}`;
+function saveHistory(chatId: number, turns: BotTurn[]): void {
+  chatHistory.set(chatId, turns.slice(-HISTORY_TURNS));
 }
 
-function chatLockKey(chatId: number): string {
-  return `manti:lock:${chatId}`;
+function getSelectedModel(chatId: number): string {
+  return chatModels.get(chatId) || DEFAULT_MODEL;
 }
 
-async function loadHistory(
-  app: FastifyInstance,
-  chatId: number,
-): Promise<BotTurn[]> {
-  try {
-    const raw = await app.redis.get(historyKey(chatId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as BotTurn[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+function setSelectedModel(chatId: number, model: string): void {
+  chatModels.set(chatId, model);
 }
 
-async function saveHistory(
-  app: FastifyInstance,
-  chatId: number,
-  turns: BotTurn[],
-): Promise<void> {
-  try {
-    const trimmed = turns.slice(-HISTORY_TURNS);
-    await app.redis.set(
-      historyKey(chatId),
-      JSON.stringify(trimmed),
-      "EX",
-      HISTORY_TTL_SECONDS,
-    );
-  } catch {
-    // non-fatal
-  }
-}
-
-async function getSelectedModel(
-  app: FastifyInstance,
-  chatId: number,
-): Promise<string> {
-  try {
-    const model = await app.redis.get(modelKey(chatId));
-    return model || DEFAULT_MODEL;
-  } catch {
-    return DEFAULT_MODEL;
-  }
-}
-
-async function setSelectedModel(
-  app: FastifyInstance,
-  chatId: number,
-  model: string,
-): Promise<void> {
-  await app.redis.set(modelKey(chatId), model, "EX", 30 * 24 * 60 * 60);
-}
-
-async function clearHistory(
-  app: FastifyInstance,
-  chatId: number,
-): Promise<void> {
-  await app.redis.del(historyKey(chatId));
+function clearHistory(chatId: number): void {
+  chatHistory.delete(chatId);
 }
 
 async function generateReply(
-  app: FastifyInstance,
   chatId: number,
   prompt: string,
 ): Promise<string> {
-  const turns = await loadHistory(app, chatId);
-  const model = await getSelectedModel(app, chatId);
+  const turns = loadHistory(chatId);
+  const model = getSelectedModel(chatId);
 
   const history = turns.flatMap((t) => [
     { role: "user" as const, content: t.user },
@@ -280,7 +228,7 @@ async function generateReply(
 
   const finalResponse = response.trim();
   if (finalResponse) {
-    await saveHistory(app, chatId, [
+    saveHistory(chatId, [
       ...turns,
       { user: prompt, assistant: finalResponse },
     ]);
@@ -289,35 +237,26 @@ async function generateReply(
 }
 
 async function withChatLock<T>(
-  app: FastifyInstance,
   chatId: number,
   task: () => Promise<T>,
 ): Promise<T | null> {
-  const acquired = await app.redis.set(
-    chatLockKey(chatId),
-    "1",
-    "EX",
-    LOCK_TTL_SECONDS,
-    "NX",
-  );
-  if (!acquired) return null;
+  if (chatLocks.has(chatId)) return null;
+  chatLocks.add(chatId);
 
   try {
     return await task();
   } finally {
-    await app.redis.del(chatLockKey(chatId));
+    chatLocks.delete(chatId);
   }
 }
 
 async function handleModelCommand(
-  app: FastifyInstance,
   message: TelegramMessage,
   argument: string,
 ): Promise<void> {
   const chatId = message.chat.id;
 
   if (!argument) {
-    // List available models and show current selection
     let models: string[];
     try {
       models = await listModels();
@@ -331,7 +270,7 @@ async function handleModelCommand(
       return;
     }
 
-    const current = await getSelectedModel(app, chatId);
+    const current = getSelectedModel(chatId);
     const lines = models.map((m) => (m === current ? `  • ${m} ✓` : `  • ${m}`));
     await sendText(
       chatId,
@@ -341,7 +280,6 @@ async function handleModelCommand(
     return;
   }
 
-  // Set model
   let models: string[];
   try {
     models = await listModels();
@@ -363,7 +301,7 @@ async function handleModelCommand(
     return;
   }
 
-  await setSelectedModel(app, chatId, match);
+  setSelectedModel(chatId, match);
   await sendText(chatId, `Switched to model: ${match}`, message.message_id);
 }
 
@@ -380,7 +318,6 @@ async function registerCommands(): Promise<void> {
 }
 
 async function handleIncomingMessage(
-  app: FastifyInstance,
   message: TelegramMessage,
   botUsername: string,
 ): Promise<void> {
@@ -392,7 +329,7 @@ async function handleIncomingMessage(
   const chatType = message.chat.type;
 
   if (command === "/start") {
-    const currentModel = await getSelectedModel(app, message.chat.id);
+    const currentModel = getSelectedModel(message.chat.id);
     await sendText(
       message.chat.id,
       `Hey! I'm Mantichat, your conversational AI assistant.\n\nJust send me a message and I'll do my best to help.\n\nCurrently using: ${currentModel}\nSwitch models with /model`,
@@ -418,13 +355,13 @@ async function handleIncomingMessage(
   }
 
   if (command === "/ping") {
-    const model = await getSelectedModel(app, message.chat.id);
+    const model = getSelectedModel(message.chat.id);
     await sendText(message.chat.id, `pong (model: ${model})`, message.message_id);
     return;
   }
 
   if (command === "/reset" || command === "/clear") {
-    await clearHistory(app, message.chat.id);
+    clearHistory(message.chat.id);
     await sendText(
       message.chat.id,
       "Conversation cleared. Send me a new message to start fresh.",
@@ -436,7 +373,7 @@ async function handleIncomingMessage(
   if (command === "/model") {
     const commandToken = message.text.split(/\s+/, 1)[0] || "/model";
     const argument = message.text.slice(commandToken.length).trim();
-    await handleModelCommand(app, message, argument);
+    await handleModelCommand(message, argument);
     return;
   }
 
@@ -456,12 +393,12 @@ async function handleIncomingMessage(
     return;
   }
 
-  const result = await withChatLock(app, message.chat.id, async () => {
+  const result = await withChatLock(message.chat.id, async () => {
     await telegramApi("sendChatAction", {
       chat_id: message.chat.id,
       action: "typing",
     });
-    const reply = await generateReply(app, message.chat.id, prompt);
+    const reply = await generateReply(message.chat.id, prompt);
     await sendText(
       message.chat.id,
       reply || "I couldn't generate a response. Try again or switch models with /model.",
@@ -478,16 +415,9 @@ async function handleIncomingMessage(
   }
 }
 
-export async function startMantiBot(
-  app: FastifyInstance,
-): Promise<MantiBotHandle> {
-  if (!BOT_ENABLED) {
-    app.log.info("Mantichat bot disabled (MANTI_BOT_ENABLED=false)");
-    return { stop: async () => {} };
-  }
-
+export async function startMantiBot(): Promise<MantiBotHandle> {
   if (!BOT_TOKEN) {
-    app.log.warn("Mantichat bot not started: MANTI_BOT_TOKEN is missing");
+    console.warn("Mantichat bot not started: MANTI_BOT_TOKEN is missing");
     return { stop: async () => {} };
   }
 
@@ -499,13 +429,10 @@ export async function startMantiBot(
   try {
     await registerCommands();
   } catch (error) {
-    app.log.warn({ err: error }, "Failed to register Mantichat commands");
+    console.warn("Failed to register Mantichat commands:", error);
   }
 
-  app.log.info(
-    { botId: me.id, botUsername: `@${botUsername}` },
-    "Mantichat bot long polling started",
-  );
+  console.log(`Mantichat bot started as @${botUsername}`);
 
   let stopped = false;
   let offset = 0;
@@ -523,9 +450,9 @@ export async function startMantiBot(
           offset = update.update_id + 1;
           if (!update.message) continue;
           try {
-            await handleIncomingMessage(app, update.message, botUsername);
+            await handleIncomingMessage(update.message, botUsername);
           } catch (error) {
-            app.log.error({ err: error }, "Mantichat message handling failed");
+            console.error("Mantichat message handling failed:", error);
             await sendText(
               update.message.chat.id,
               "I hit an error while generating that response.",
@@ -535,7 +462,7 @@ export async function startMantiBot(
         }
       } catch (error) {
         if (stopped) break;
-        app.log.error({ err: error }, "Mantichat polling failed; retrying");
+        console.error("Mantichat polling failed; retrying:", error);
         await sleep(RETRY_DELAY_MS);
       }
     }
@@ -545,7 +472,7 @@ export async function startMantiBot(
     stop: async () => {
       stopped = true;
       await loop.catch(() => {});
-      app.log.info("Mantichat bot stopped");
+      console.log("Mantichat bot stopped");
     },
   };
 }
