@@ -65,7 +65,7 @@ interface BotTurn {
   assistant: string;
 }
 
-const SYSTEM_PROMPT = `You are Manti, a friendly and knowledgeable conversational AI assistant. You help users with a wide range of topics including general knowledge, creative writing, brainstorming, analysis, math, science, and everyday questions.
+const SYSTEM_PROMPT = `You are Mantichat, a friendly and knowledgeable conversational AI assistant. You help users with a wide range of topics including general knowledge, creative writing, brainstorming, analysis, math, science, and everyday questions.
 
 ## Personality
 - Warm, approachable, and conversational
@@ -370,7 +370,7 @@ async function handleModelCommand(
 async function registerCommands(): Promise<void> {
   await telegramApi("setMyCommands", {
     commands: [
-      { command: "start", description: "Start chatting with Manti" },
+      { command: "start", description: "Start chatting with Mantichat" },
       { command: "model", description: "List or switch Ollama models" },
       { command: "reset", description: "Clear conversation history" },
       { command: "help", description: "Show bot commands" },
@@ -395,7 +395,7 @@ async function handleIncomingMessage(
     const currentModel = await getSelectedModel(app, message.chat.id);
     await sendText(
       message.chat.id,
-      `Hey! I'm Manti, your conversational AI assistant.\n\nJust send me a message and I'll do my best to help.\n\nCurrently using: ${currentModel}\nSwitch models with /model`,
+      `Hey! I'm Mantichat, your conversational AI assistant.\n\nJust send me a message and I'll do my best to help.\n\nCurrently using: ${currentModel}\nSwitch models with /model`,
       message.message_id,
     );
     return;
@@ -482,12 +482,12 @@ export async function startMantiBot(
   app: FastifyInstance,
 ): Promise<MantiBotHandle> {
   if (!BOT_ENABLED) {
-    app.log.info("Manti bot disabled (MANTI_BOT_ENABLED=false)");
+    app.log.info("Mantichat bot disabled (MANTI_BOT_ENABLED=false)");
     return { stop: async () => {} };
   }
 
   if (!BOT_TOKEN) {
-    app.log.warn("Manti bot not started: MANTI_BOT_TOKEN is missing");
+    app.log.warn("Mantichat bot not started: MANTI_BOT_TOKEN is missing");
     return { stop: async () => {} };
   }
 
@@ -499,12 +499,12 @@ export async function startMantiBot(
   try {
     await registerCommands();
   } catch (error) {
-    app.log.warn({ err: error }, "Failed to register Manti commands");
+    app.log.warn({ err: error }, "Failed to register Mantichat commands");
   }
 
   app.log.info(
     { botId: me.id, botUsername: `@${botUsername}` },
-    "Manti bot long polling started",
+    "Mantichat bot long polling started",
   );
 
   let stopped = false;
@@ -525,7 +525,7 @@ export async function startMantiBot(
           try {
             await handleIncomingMessage(app, update.message, botUsername);
           } catch (error) {
-            app.log.error({ err: error }, "Manti message handling failed");
+            app.log.error({ err: error }, "Mantichat message handling failed");
             await sendText(
               update.message.chat.id,
               "I hit an error while generating that response.",
@@ -535,7 +535,7 @@ export async function startMantiBot(
         }
       } catch (error) {
         if (stopped) break;
-        app.log.error({ err: error }, "Manti polling failed; retrying");
+        app.log.error({ err: error }, "Mantichat polling failed; retrying");
         await sleep(RETRY_DELAY_MS);
       }
     }
@@ -545,7 +545,7 @@ export async function startMantiBot(
     stop: async () => {
       stopped = true;
       await loop.catch(() => {});
-      app.log.info("Manti bot stopped");
+      app.log.info("Mantichat bot stopped");
     },
   };
 }

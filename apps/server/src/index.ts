@@ -18,7 +18,7 @@ async function main() {
   try {
     manti = await startMantiBot(app);
   } catch (err) {
-    app.log.error({ err }, "Failed to start Manti bot; continuing without Manti runtime");
+    app.log.error({ err }, "Failed to start Mantichat bot; continuing without Mantichat runtime");
   }
 
   try {
