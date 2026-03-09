@@ -17,9 +17,30 @@ interface OllamaChunk {
   prompt_eval_count?: number;
 }
 
+export async function listModels(): Promise<string[]> {
+  const headers: Record<string, string> = {};
+  if (OLLAMA_API_KEY) {
+    headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
+  }
+
+  const res = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Ollama error: ${res.status} ${res.statusText}`);
+  }
+
+  const data = (await res.json()) as { models: { name: string }[] };
+  return (data.models || []).map((m) => m.name);
+}
+
 export async function* streamChat(
   messages: OllamaMessage[],
   signal?: AbortSignal,
+  model?: string,
 ): AsyncGenerator<OllamaChunk> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (OLLAMA_API_KEY) {
@@ -30,7 +51,7 @@ export async function* streamChat(
     method: "POST",
     headers,
     body: JSON.stringify({
-      model: OLLAMA_MODEL,
+      model: model || OLLAMA_MODEL,
       messages,
       stream: true,
     }),
