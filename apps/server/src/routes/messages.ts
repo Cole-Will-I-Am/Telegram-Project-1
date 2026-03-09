@@ -42,7 +42,7 @@ export async function messageRoutes(app: FastifyInstance) {
       orderBy: { createdAt: "asc" },
     });
 
-    const history = dbMessages.map((m) => ({
+    const history = dbMessages.map((m: any) => ({
       role: m.role as "user" | "assistant" | "system",
       content: m.content,
     }));
@@ -53,7 +53,7 @@ export async function messageRoutes(app: FastifyInstance) {
       const files = await app.prisma.file.findMany({
         where: { id: { in: fileIds }, projectId: thread.projectId },
       });
-      attachedFiles.push(...files.map((f) => ({
+      attachedFiles.push(...files.map((f: any) => ({
         path: f.path,
         content: f.content,
         language: f.language,

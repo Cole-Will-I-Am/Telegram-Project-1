@@ -15,7 +15,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
       where: { userId: req.userId },
       include: { workspace: true },
     });
-    return memberships.map((m) => m.workspace);
+    return memberships.map((m: any) => m.workspace);
   });
 
   // Create workspace
