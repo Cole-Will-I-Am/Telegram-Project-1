@@ -67,7 +67,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
     if (!project) return reply.code(404).send({ error: "Not found" });
 
-    const isMember = project.workspace.members.some((m) => m.userId === req.userId);
+    const isMember = project.workspace.members.some((m: { userId: string }) => m.userId === req.userId);
     if (!isMember) return reply.code(403).send({ error: "Forbidden" });
 
     return project;
@@ -84,7 +84,7 @@ export async function projectRoutes(app: FastifyInstance) {
     });
     if (!project) return reply.code(404).send({ error: "Not found" });
 
-    const member = project.workspace.members.find((m) => m.userId === req.userId);
+    const member = project.workspace.members.find((m: { userId: string; role: string }) => m.userId === req.userId);
     if (!member || member.role === "viewer") return reply.code(403).send({ error: "Forbidden" });
 
     return app.prisma.project.update({ where: { id }, data });
