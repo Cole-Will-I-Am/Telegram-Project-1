@@ -22,7 +22,15 @@ export async function threadRoutes(app: FastifyInstance) {
       include: { _count: { select: { messages: true } } },
     });
 
-    return threads.map((t) => ({
+    return threads.map((t: {
+      id: string;
+      projectId: string;
+      title: string;
+      createdById: string;
+      createdAt: Date;
+      updatedAt: Date;
+      _count: { messages: number };
+    }) => ({
       id: t.id,
       projectId: t.projectId,
       title: t.title,
