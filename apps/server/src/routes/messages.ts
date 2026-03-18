@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { streamChat, getModelName } from "../services/ollama.service.js";
+import { streamChat, getModelName } from "../services/ai.service.js";
 import { buildMessages } from "../services/prompt.service.js";
 
 const sendSchema = z.object({
