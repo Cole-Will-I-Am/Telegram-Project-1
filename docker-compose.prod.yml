@@ -38,7 +38,10 @@ services:
       TELEGRAM_MINIAPP_URL: ${TELEGRAM_MINIAPP_URL:-}
       TELEGRAM_DEV_AUTH: ${TELEGRAM_DEV_AUTH:-false}
       JWT_SECRET: ${JWT_SECRET}
-      AI_PROVIDER: ${AI_PROVIDER:-openai}
+      AI_PROVIDER: ${AI_PROVIDER:-ollama}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-https://api.ollama.com}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-minimax-m2.7:cloud}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}

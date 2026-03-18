@@ -2,6 +2,7 @@
  * AI provider service — replaces ollama.service.ts
  *
  * Supports:
+ *   - Ollama cloud (set AI_PROVIDER=ollama + OLLAMA_API_KEY)
  *   - OpenAI  (set AI_PROVIDER=openai  + OPENAI_API_KEY)
  *   - Anthropic (set AI_PROVIDER=anthropic + ANTHROPIC_API_KEY)
  *
@@ -9,8 +10,13 @@
  * messages route already consumes, so nothing else needs to change.
  */
 
-const AI_PROVIDER = (process.env.AI_PROVIDER || "openai").toLowerCase();
+const AI_PROVIDER = (process.env.AI_PROVIDER || "ollama").toLowerCase();
 const TIMEOUT_MS = 120_000;
+
+/* ── Ollama config ─────────────────────────────────────────────── */
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "https://api.ollama.com";
+const OLLAMA_API_KEY = process.env.OLLAMA_API_KEY || "";
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "minimax-m2.7:cloud";
 
 /* ── OpenAI config ─────────────────────────────────────────────── */
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -35,6 +41,66 @@ export interface ChatChunk {
   total_duration?: number;
   eval_count?: number;
   prompt_eval_count?: number;
+}
+
+/* ================================================================
+   Ollama cloud streaming (/api/chat NDJSON)
+   ================================================================ */
+
+async function* streamOllama(
+  messages: ChatMessage[],
+  signal?: AbortSignal,
+): AsyncGenerator<ChatChunk> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (OLLAMA_API_KEY) {
+    headers["Authorization"] = `Bearer ${OLLAMA_API_KEY}`;
+  }
+
+  const res = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      messages,
+      stream: true,
+    }),
+    signal: signal ?? AbortSignal.timeout(TIMEOUT_MS),
+  });
+
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Ollama error ${res.status}: ${text}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        yield JSON.parse(line) as ChatChunk;
+      } catch {
+        // skip malformed
+      }
+    }
+  }
+
+  if (buffer.trim()) {
+    try {
+      yield JSON.parse(buffer) as ChatChunk;
+    } catch {
+      // skip
+    }
+  }
 }
 
 /* ================================================================
@@ -252,11 +318,15 @@ export async function* streamChat(
 ): AsyncGenerator<ChatChunk> {
   if (AI_PROVIDER === "anthropic") {
     yield* streamAnthropic(messages, signal);
-  } else {
+  } else if (AI_PROVIDER === "openai") {
     yield* streamOpenAI(messages, signal);
+  } else {
+    yield* streamOllama(messages, signal);
   }
 }
 
 export function getModelName(): string {
-  return AI_PROVIDER === "anthropic" ? ANTHROPIC_MODEL : OPENAI_MODEL;
+  if (AI_PROVIDER === "anthropic") return ANTHROPIC_MODEL;
+  if (AI_PROVIDER === "openai") return OPENAI_MODEL;
+  return OLLAMA_MODEL;
 }
