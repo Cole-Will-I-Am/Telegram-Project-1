@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { buildMessages } from "./prompt.service.js";
-import { streamChat } from "./ollama.service.js";
+import { streamChat } from "./ai.service.js";
 
 const TELEGRAM_API = "https://api.telegram.org";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";

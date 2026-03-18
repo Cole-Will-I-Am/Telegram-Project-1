@@ -43,7 +43,7 @@ export default function SettingsPage() {
               <div className="h-2 w-2 rounded-full bg-success" />
               <span className="text-sm">Forge Code</span>
               <span className="ml-auto text-xs text-text-tertiary">
-                via Ollama
+                AI-powered
               </span>
             </div>
           </ChromeCard>
